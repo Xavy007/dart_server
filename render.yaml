@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: dart-socket-server
+    env: docker
+    plan: free
+    region: oregon
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: "/"
