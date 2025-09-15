@@ -14,7 +14,7 @@ COPY . .
 RUN dart pub get
 
 # Exponer el puerto que la aplicación escuchará
-EXPOSE 3000
+EXPOSE 3050
 
 # Comando para ejecutar el servidor
 CMD ["dart", "bin/server.dart"]
