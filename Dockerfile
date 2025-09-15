@@ -1,17 +1,17 @@
-# Usar una imagen base de Dart
+# Usar la imagen base de Dart
 FROM dart:stable AS build
 
 # Establecer el directorio de trabajo
 WORKDIR /app
 
-# Copiar los archivos de la aplicación al contenedor
+# Copiar los archivos al contenedor
 COPY . .
 
-# Obtener las dependencias de Dart
+# Obtener las dependencias del proyecto
 RUN dart pub get
 
-# Exponer el puerto en el que la aplicación escuchará
+# Exponer el puerto que se usará en el contenedor
 EXPOSE 3000
 
-# Comando para ejecutar la aplicación
+# Comando para ejecutar el servidor
 CMD ["dart", "bin/server.dart"]
