@@ -7,7 +7,7 @@ void main() async {
   final dbHelper = DatabaseHelper();
 
   // Establecer el puerto en el que escuchará el servidor
-  const port = 3001;
+  const port = 3050;
   final server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
   print('Servidor escuchando en ${server.address.address}:${server.port}');
 
@@ -72,4 +72,5 @@ void main() async {
 
 
 }
+
 
