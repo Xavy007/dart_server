@@ -1,20 +1,18 @@
-# Usar la imagen base de Dart
+# ---- Build
 FROM dart:stable AS build
-
-# Instalar libsqlite3
-RUN apt-get update && apt-get install -y libsqlite3-dev
-
-# Establecer el directorio de trabajo
 WORKDIR /app
-
-# Copiar los archivos del proyecto al contenedor
-COPY . .
-
-# Obtener las dependencias del proyecto
+COPY pubspec.* ./
 RUN dart pub get
+COPY . .
+RUN dart pub get --offline
+RUN dart compile exe bin/server.dart -o /app/server
 
-# Exponer el puerto que la aplicación escuchará
-EXPOSE 3050
-
-# Comando para ejecutar el servidor
-CMD ["dart", "bin/server.dart"]
+# ---- Runtime
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app/server /app/server
+EXPOSE 3000
+ENV PORT=3000
+CMD ["/app/server"]
