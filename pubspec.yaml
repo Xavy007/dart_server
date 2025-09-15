@@ -1,0 +1,18 @@
+name: my_server
+description: Un servidor TCP con base de datos SQLite
+
+publish_to: 'none' # Esto evita que el paquete sea publicado accidentalmente en pub.dev
+
+version: 0.1.0
+
+environment:
+  sdk: ">=2.18.0 <3.0.0"  # Establece la versión de Dart compatible con tu proyecto
+
+dependencies:
+  sqlite3: ^2.9.0  # Dependencia para interactuar con SQLite
+  
+dev_dependencies:
+  pedantic: ^1.9.0  # Herramientas de linting para mejorar la calidad del código (opcional)
+
+flutter:
+  sdk: flutter  # Si no usas Flutter, elimina esta línea
