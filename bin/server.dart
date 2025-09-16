@@ -6,6 +6,96 @@ void main() {
   final port = int.parse(Platform.environment['PORT'] ?? '3000');
   final io = Server();
 
+  // Solo guardamos sockets que YA eligieron nombre
+  final names = <String, String>{}; // socketId -> name
+
+  String uniqueName(String raw) {
+    var base = (raw.trim().isEmpty ? 'Anon' : raw.trim());
+    final taken = names.values.map((e) => e.toLowerCase()).toSet();
+    var candidate = base;
+    var i = 1;
+    while (taken.contains(candidate.toLowerCase())) {
+      i++;
+      candidate = '$base#$i';
+    }
+    return candidate;
+  }
+
+  void broadcastUsers() {
+    final users = names.entries
+        .map((e) => {'id': e.key, 'name': e.value})
+        .toList();
+    io.emit('online_users', users);
+  }
+
+  io.on('connection', (client) {
+    print('⚡ connected: ${client.id}');
+    // 👇 NO agregamos 'Anon' por defecto
+
+    // Cliente fija su nombre
+    client.on('set_name', (data) {
+      final raw = (data is Map && data['name'] is String) ? data['name'] as String : '';
+      final nick = uniqueName(raw);
+
+      final wasNamed = names.containsKey(client.id);
+      names[client.id] = nick;
+
+      client.emit('name_accepted', {'name': nick});
+      if (!wasNamed) {
+        // solo anunciamos la primera vez que se nombra
+        client.broadcast.emit('user_joined', {'id': client.id, 'name': nick});
+      }
+      broadcastUsers();
+      print('👤 ${client.id} -> $nick');
+    });
+
+    // Mensaje público
+    client.on('send_message', (data) {
+      final text = (data is Map && data['text'] is String)
+          ? data['text'].toString().trim()
+          : '';
+      if (text.isEmpty) return;
+
+      final from = names[client.id] ?? 'Anon';
+      io.emit('chat_message', {
+        'fromId': client.id,
+        'from': from,
+        'text': text,
+        'ts': DateTime.now().toUtc().toIso8601String(),
+      });
+    });
+
+    // (opcional) saludo al que se conectó
+    Timer(const Duration(seconds: 5), () {
+      try {
+        if (client.connected == true) client.emit('msg', 'Hello from server');
+      } catch (_) {}
+    });
+
+    client.on('disconnect', (_) {
+      // ✅ solo avisamos "salió" si estaba nombrado
+      final name = names.remove(client.id);
+      if (name != null) {
+        io.emit('user_left', {'id': client.id, 'name': name});
+        broadcastUsers();
+        print('👋 disconnected: ${client.id} ($name)');
+      } else {
+        print('👋 disconnected (unnamed): ${client.id}');
+      }
+    });
+  });
+
+  io.listen(port); // path por defecto: /socket.io/
+  print('✅ Socket.IO v2 escuchando en 0.0.0.0:$port (path: /socket.io/)');
+}
+/*import 'dart:async';
+import 'dart:io';
+import 'package:socket_io/socket_io.dart';
+
+void main() {
+  final port = int.parse(Platform.environment['PORT'] ?? '3000');
+  final io = Server();
+
   // Mapa: socketId -> nombre
   final names = <String, String>{};
 
@@ -82,7 +172,7 @@ void main() {
   // No hay ruta "/", así que el health check de Render debe apuntar a /socket.io?...
   io.listen(port);
   print('✅ Socket.IO v2 listening on 0.0.0.0:$port (path: /socket.io/)');
-}
+}*/
 
 
 /*import 'dart:async';
@@ -122,5 +212,6 @@ Future<void> main() async {
   print('✅ Socket.IO listening on 0.0.0.0:$port');
 }
 */
+
 
 
