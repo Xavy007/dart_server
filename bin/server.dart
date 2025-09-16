@@ -3,6 +3,82 @@ import 'dart:async';
 import 'dart:io';
 import 'package:socket_io/socket_io.dart';
 
+void main() {
+  final port = int.parse(Platform.environment['PORT'] ?? '3000');
+  final io = Server();
+
+  // id -> name
+  final names = <String, String>{};
+
+  String _uniqueName(String raw) {
+    var base = (raw.trim().isEmpty ? 'Anon' : raw.trim());
+    final taken = names.values.map((e) => e.toLowerCase()).toSet();
+    var candidate = base;
+    var i = 1;
+    while (taken.contains(candidate.toLowerCase())) {
+      i++;
+      candidate = '$base#$i';
+    }
+    return candidate;
+  }
+
+  void _broadcastUsers() {
+    final users = names.entries
+        .map((e) => {'id': e.key, 'name': e.value})
+        .toList();
+    io.emit('online_users', users);
+  }
+
+  io.on('connection', (client) {
+    print('⚡ connected: ${client.id}');
+    names[client.id] = 'Anon';
+    _broadcastUsers();
+
+    client.on('set_name', (data) {
+      try {
+        final raw = (data is Map && data['name'] is String) ? data['name'] as String : '';
+        final unique = _uniqueName(raw);
+        final old = names[client.id];
+        names[client.id] = unique;
+
+        client.emit('name_accepted', {'name': unique});
+        client.broadcast.emit('user_joined', {'id': client.id, 'name': unique});
+        _broadcastUsers();
+        print('👤 ${client.id} name: $old -> $unique');
+      } catch (_) {
+        client.emit('name_error', {'message': 'Nombre inválido'});
+      }
+    });
+
+    client.on('send_message', (data) {
+      final text = (data is Map && data['text'] is String) ? (data['text'] as String).trim() : '';
+      if (text.isEmpty) return;
+      final name = names[client.id] ?? 'Anon';
+      final payload = {
+        'fromId': client.id,
+        'from': name,
+        'text': text,
+        'ts': DateTime.now().toUtc().toIso8601String(),
+      };
+      io.emit('chat_message', payload);
+    });
+
+    client.on('disconnect', (_) {
+      final name = names.remove(client.id);
+      io.emit('user_left', {'id': client.id, 'name': name});
+      _broadcastUsers();
+      print('👋 disconnected: ${client.id} ($name)');
+    });
+  });
+
+  io.listen(port);
+  print('✅ Socket.IO listening on 0.0.0.0:$port');
+}
+
+/*import 'dart:async';
+import 'dart:io';
+import 'package:socket_io/socket_io.dart';
+
 Future<void> main() async {
   final port = int.parse(Platform.environment['PORT'] ?? '3000');
 
@@ -35,3 +111,4 @@ Future<void> main() async {
 
   print('✅ Socket.IO listening on 0.0.0.0:$port');
 }
+*/
