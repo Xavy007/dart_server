@@ -1,111 +1,89 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:convert';
-import 'package:my_server/database.dart';
+import 'package:socket_io/socket_io.dart';
 
-void main() async {
-  final dbHelper = DatabaseHelper();
+void main() {
+  final port = int.parse(Platform.environment['PORT'] ?? '3000');
+  final io = Server();
 
-  // Establecer el puerto en el que escuchará el servidor
-  const port = 3050;
-  final server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
-  print('Servidor escuchando en ${server.address.address}:${server.port}');
+  // Mapa: socketId -> nombre
+  final names = <String, String>{};
 
-  final clients = <Socket>{};
+  String _uniqueName(String raw) {
+    var base = (raw.trim().isEmpty ? 'Anon' : raw.trim());
+    final taken = names.values.map((e) => e.toLowerCase()).toSet();
+    var candidate = base;
+    var i = 1;
+    while (taken.contains(candidate.toLowerCase())) {
+      i++;
+      candidate = '$base#$i';
+    }
+    return candidate;
+  }
 
-  // Escuchar nuevas conexiones de clientes
-  server.listen((client) async {
-    clients.add(client);
-    print('Conectado: ${client.remoteAddress.address}:${client.remotePort}');
+  void _broadcastUsers() {
+    final users = names.entries.map((e) => {'id': e.key, 'name': e.value}).toList();
+    io.emit('online_users', users);
+  }
 
-    // Solicitar nombre de usuario
-    client.write('Ingrese su nombre de usuario: ');
+  io.on('connection', (client) {
+    print('⚡ connected: ${client.id}');
+    // Por defecto, entra como "Anon"
+    names[client.id] = 'Anon';
+    _broadcastUsers();
 
-    var stream = client.cast<List<int>>().transform(utf8.decoder).transform(LineSplitter()).asBroadcastStream();
+    // Cliente envía su nombre
+    client.on('set_name', (data) {
+      try {
+        final raw = (data is Map && data['name'] is String) ? data['name'] as String : '';
+        final unique = _uniqueName(raw);
+        final old = names[client.id];
+        names[client.id] = unique;
 
-    // Escuchar el nombre de usuario del cliente
-    stream.listen((line) async {
-      final username = line.trim();
-      if (username.isEmpty) {
-        client.write('Nombre de usuario no válido.\n');
-        client.close();
-        return;
+        client.emit('name_accepted', {'name': unique}); // respuesta al que puso nombre
+        client.broadcast.emit('user_joined', {'id': client.id, 'name': unique}); // para el resto
+        _broadcastUsers();
+        print('👤 ${client.id} name: $old -> $unique');
+      } catch (_) {
+        client.emit('name_error', {'message': 'Nombre inválido'});
       }
+    });
 
-      if (!await dbHelper.userExists(username)) {
-        await dbHelper.addUser(username);
-        client.write('¡Bienvenido $username!\n');
-      } else {
-        client.write('Bienvenido de nuevo, $username!\n');
-      }
+    // Mensaje público
+    client.on('send_message', (data) {
+      final text = (data is Map && data['text'] is String) ? (data['text'] as String).trim() : '';
+      if (text.isEmpty) return;
+      final name = names[client.id] ?? 'Anon';
+      final payload = {
+        'fromId': client.id,
+        'from': name,
+        'text': text,
+        'ts': DateTime.now().toUtc().toIso8601String(),
+      };
+      io.emit('chat_message', payload); // broadcast a todos (incluido el emisor)
+    });
 
-      // Una vez que el usuario está registrado, comenzar a escuchar los mensajes
-      listenForMessages(client, username, stream, clients, dbHelper);
+    // Ejemplo: saludo automático a los 5s (solo si sigue conectado)
+    Timer(const Duration(seconds: 5), () {
+      try {
+        if (client.connected == true) client.emit('msg', 'Hello from server');
+      } catch (_) {}
+    });
+
+    client.on('disconnect', (_) {
+      final name = names.remove(client.id);
+      io.emit('user_left', {'id': client.id, 'name': name});
+      _broadcastUsers();
+      print('👋 disconnected: ${client.id} ($name)');
     });
   });
+
+  // **OJO**: esto levanta el servidor HTTP interno de Socket.IO.
+  // No hay ruta "/", así que el health check de Render debe apuntar a /socket.io?...
+  io.listen(port);
+  print('✅ Socket.IO v2 listening on 0.0.0.0:$port (path: /socket.io/)');
 }
 
-// Función para escuchar mensajes después de que el cliente se haya registrado
-void listenForMessages(Socket client, String username, Stream<String> stream, Set<Socket> clients, DatabaseHelper dbHelper) {
-  // Mantener el stream abierto y escuchar continuamente los mensajes
-  stream.listen(
-    (line) async {
-      final text = line.trimRight();
-      if (text.isEmpty) return;
-
-      // Imprimir mensaje recibido en el servidor
-      print('Mensaje recibido de $username: $text');
-
-      // Almacenar el mensaje en la base de datos
-      await dbHelper.insertMessage(username, text);
-
-      // Enviar el mensaje a todos los demás clientes
-      final payload = '[$username] $text';
-      sendToAll(clients, payload, except: client);
-    },
-    onDone: () {
-      // Cuando el cliente se desconecta, limpiamos y registramos la desconexión
-      clients.remove(client);
-      print('Desconectado: ${client.remoteAddress.address}:${client.remotePort}');
-      client.close();
-    },
-    onError: (e) {
-      // Maneja el error y asegura que la conexión se cierre correctamente
-      clients.remove(client);
-      print('Error con ${client.remoteAddress.address}:${client.remotePort}: $e');
-      client.close();
-    },
-    cancelOnError: true,
-  );
-}
-
-/// Enviar mensaje a todos los clientes excepto al emisor
-void sendToAll(Set<Socket> clients, String message, {Socket? except}) {
-  // Crear una lista de clientes desconectados para eliminar de la lista
-  final toRemove = <Socket>[];
-
-  for (final client in clients) {
-    if (client != except) {
-      try {
-        // Verificar si el cliente está desconectado antes de escribir
-        if (!client.close()) {
-          client.write(message);
-        }
-      } catch (e) {
-        // Si hay un error al escribir, eliminamos al cliente desconectado
-        print('Error enviando mensaje a ${client.remoteAddress.address}: $e');
-        toRemove.add(client);
-      }
-    }
-  }
-
-  // Limpiar la lista de clientes desconectados
-  for (final c in toRemove) {
-    clients.remove(c);
-    try {
-      c.destroy();
-    } catch (_) {}
-  }
-}
 
 /*import 'dart:async';
 import 'dart:io';
@@ -144,4 +122,5 @@ Future<void> main() async {
   print('✅ Socket.IO listening on 0.0.0.0:$port');
 }
 */
+
 
