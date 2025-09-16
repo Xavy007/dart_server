@@ -6,4 +6,5 @@ services:
     region: oregon
     autoDeploy: true
     dockerfilePath: ./Dockerfile
-    healthCheckPath: "/"
+    healthCheckPath: "/"         # o "/socket.io/" si no sirves "/"
+    startCommand: /app/server    # 👈 esto evita que Render use uno incorrecto
